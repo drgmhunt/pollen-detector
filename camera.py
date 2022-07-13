@@ -1,18 +1,18 @@
-#modified version of qt.py from http://www.touptek.com/download/showdownload.php?lang=en&id=32
-#displays feed from camera - clicking the Save button saves the feed as a bmp file
-
-
 import sys, toupcam
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt
 from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtWidgets import QLabel, QApplication, QWidget, QDesktopWidget, QCheckBox, QMessageBox,QPushButton
+from PyQt5.QtWidgets import QLabel,  QWidget, QDesktopWidget, QMessageBox,QPushButton,QGraphicsPixmapItem
 
-class MainWin(QWidget):
+
+class CameraWin(QWidget):
     eventImage = pyqtSignal()
 # code to write the camera buffer to a file
     def save_image(self):
             img = QImage(self.buf, self.w, self.h, (self.w * 24 + 31) // 32 * 4, QImage.Format_RGB888)
             img.save("test.bmp")
+    def get_camera_feed(self):
+            img=QImage(self.buf, self.w, self.h, (self.w * 24 + 31) // 32 * 4, QImage.Format_RGB888)
+            return(img)
 
     def __init__(self):
         super().__init__()
@@ -21,27 +21,29 @@ class MainWin(QWidget):
         self.w = 0           # video width
         self.h = 0           # video height
         self.total = 0
-        self.setFixedSize(800, 600)
-        qtRectangle = self.frameGeometry()
-        centerPoint = QDesktopWidget().availableGeometry().center()
-        qtRectangle.moveCenter(centerPoint)
-        self.move(qtRectangle.topLeft())
+
+        self.setFixedSize(1296, 972)
+        #qtRectangle = self.frameGeometry()
+        #centerPoint = QDesktopWidget().availableGeometry().center()
+        #qtRectangle.moveCenter(centerPoint)
+        #self.move(qtRectangle.topLeft())
         self.initUI()
         self.initCamera()
 
     def initUI(self):
- #use the check box to write the file because layout confusing       
-        self.cb = QPushButton('Save', self)
-        self.cb.clicked.connect(self.save_image)
+ #use the check box to write the file because layout confusing
+
+ #old code uses label to display the feed
         self.label = QLabel(self)
         self.label.setScaledContents(True)
-        self.label.move(0, 30)
+        #self.label.move(0, 30)
         self.label.resize(self.geometry().width(), self.geometry().height())
 
+  #      self.camera_feed_pixmap=QGraphicsPixmapItem(QPixmap(""))
 
 
 
-# the vast majority of callbacks come from toupcam.dll/so/dylib internal threads, so we use qt signal to post this event to the UI thread  
+# the vast majority of callbacks come from toupcam.dll/so/dylib internal threads, so we use qt signal to post this event to the UI thread
     @staticmethod
     def cameraCallback(nEvent, ctx):
         if nEvent == toupcam.TOUPCAM_EVENT_IMAGE:
@@ -65,7 +67,7 @@ class MainWin(QWidget):
         a = toupcam.Toupcam.EnumV2()
         if len(a) <= 0:
             self.setWindowTitle('No camera found')
-            self.cb.setEnabled(False)
+            #self.cb.setEnabled(False)
         else:
             self.camname = a[0].displayname
             self.setWindowTitle(self.camname)
@@ -78,7 +80,7 @@ class MainWin(QWidget):
                 self.w, self.h = self.hcam.get_Size()
                 bufsize = ((self.w * 24 + 31) // 32 * 4) * self.h
                 self.buf = bytes(bufsize)
-                self.cb.setChecked(self.hcam.get_AutoExpoEnable())            
+                #self.cb.setChecked(self.hcam.get_AutoExpoEnable())
                 try:
                     if sys.platform == 'win32':
                         self.hcam.put_Option(toupcam.TOUPCAM_OPTION_BYTEORDER, 0) # QImage.Format_RGB888
@@ -94,11 +96,3 @@ class MainWin(QWidget):
         if self.hcam is not None:
             self.hcam.Close()
             self.hcam = None
-
-    
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    win = MainWin()
-    win.show()
-    sys.exit(app.exec_())

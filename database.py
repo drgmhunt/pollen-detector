@@ -12,14 +12,16 @@ if not dbcon.open():
 def get_settings():
     #print("Database:", dbcon.databaseName(), "Connection:", dbcon.connectionName())
     query = QSqlQuery()
-    if query.exec("SELECT model,target_count,model_location,user_type FROM settings"):
-        model,target_count,model_location,user_type = range(4)
+    if query.exec("SELECT settings.modelname ,target_count,model_location,user_type,modelfile,labelmapfile FROM settings,model  where settings.modelname=model.modelname"):
+        modelname,target_count,model_location,user_type,modelfile,labelmapfile = range(6)
         if query.first():
             settings_dict={
-                "model": query.value(model),
+                "modelname": query.value(modelname),
                 "target_count": query.value(target_count),
                 "model_location": query.value(model_location),
-                "user_type":query.value(user_type)
+                "user_type":query.value(user_type),
+                "modelfile":query.value(modelfile),
+                "labelmapfile": query.value(labelmapfile)
                     }
             print(settings_dict)
             return settings_dict

@@ -3,38 +3,33 @@
 #imports needed for object detection
 import tensorflow._api.v2.compat.v1 as tf
 tf.disable_v2_behavior()
-import sys
 import numpy as np
 from object_detection.utils import ops as utils_ops
 from object_detection.utils import label_map_util
 
 
-PATH_TO_LABELS='models/UK-pollen-plus-Lycopodium_label_map.pbtxt'
-PATH_TO_CKPT='models/UK-pollen-plus-Lycopodium-graph.pb'
+def setup_model(self,modelfile,labelmapfile):
+    PATH_TO_LABELS='models/'+labelmapfile
+    PATH_TO_CKPT='models/'+modelfile
 
-detection_graph = tf.Graph()
-with detection_graph.as_default():
-    od_graph_def = tf.GraphDef()
-    with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
-        serialized_graph = fid.read()
-        od_graph_def.ParseFromString(serialized_graph)
-        tf.import_graph_def(od_graph_def, name='')
+    detection_graph = tf.Graph()
+    with detection_graph.as_default():
+        od_graph_def = tf.GraphDef()
+        with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
+            serialized_graph = fid.read()
+            od_graph_def.ParseFromString(serialized_graph)
+            tf.import_graph_def(od_graph_def, name='')
+    label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
+    categories = label_map_util.convert_label_map_to_categories(
+        label_map, max_num_classes=90, use_display_name=True)
+    self.category_index = label_map_util.create_category_index(categories)
 
-
-label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
-categories = label_map_util.convert_label_map_to_categories(
-    label_map, max_num_classes=90, use_display_name=True)
-category_index = label_map_util.create_category_index(categories)
-
-# Size, in inches, of the output images.
-IMAGE_SIZE = (12, 8)
-
+    return detection_graph
 
 def run_inference_for_single_image(image, graph):
     with graph.as_default():
         with tf.Session() as sess:
             # Get handles to input and output tensors
-            print ("running inference for image")
             ops = tf.get_default_graph().get_operations()
             all_tensor_names = {
                 output.name for op in ops for output in op.outputs}
@@ -83,3 +78,4 @@ def run_inference_for_single_image(image, graph):
             if 'detection_masks' in output_dict:
                 output_dict['detection_masks'] = output_dict['detection_masks'][0]
     return output_dict
+

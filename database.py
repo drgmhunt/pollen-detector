@@ -3,7 +3,7 @@ import sys
 from PyQt5.QtCore import Qt,QSize
 
 from PyQt5.QtWidgets import ( QHBoxLayout, QWidget,QLabel,QTableView,QDataWidgetMapper,
-                              QFormLayout,QComboBox,QLineEdit,QPushButton,QVBoxLayout,QProgressBar,QFrame )
+                              QFormLayout,QComboBox,QLineEdit,QPushButton,QVBoxLayout,QProgressBar,QFrame,QCheckBox )
 
  # createconnection
 dbcon = QSqlDatabase.addDatabase("QSQLITE")
@@ -35,12 +35,14 @@ class ProgressWidget(QFrame):
 
 
 class SampleWindow(QWidget):
-    def __init__(self):
+    def __init__(self,current_slideid):
         super().__init__()
 
         layout=QVBoxLayout()
         form = QFormLayout()
-        self.location=QComboBox()
+        self.slideid = QLineEdit()
+        self.slideid.setVisible(False)
+        self.sample=QLineEdit()
         self.slide_reference = QLineEdit()
         self.depth = QLineEdit()
         self.current_x = QLineEdit()
@@ -49,8 +51,11 @@ class SampleWindow(QWidget):
         self.current_count = QLineEdit()
         self.current_count.setReadOnly(True)
         self.notes = QLineEdit()
+        self.is_current_slide=QLineEdit()
+        self.is_current_slide.setReadOnly(True)
 
-        form.addRow(QLabel("Sample"), self.location)
+        #form.addRow(QLabel("Sample"), self.slideid)
+        form.addRow(QLabel("Sample"), self.sample)
         form.addRow(QLabel("Slide"), self.slide_reference)
         form.addRow(QLabel("Depth"), self.depth)
         form.addRow(QLabel("Transect x"), self.current_x)
@@ -58,45 +63,31 @@ class SampleWindow(QWidget):
         form.addRow(QLabel("Current Count"), self.current_count)
         form.addRow(QLabel("Target Count"), self.target_count)
         form.addRow(QLabel("Notes"), self.notes)
+        form.addRow(QLabel("Current Slide?"), self.is_current_slide)
+
 
         self.model = QSqlRelationalTableModel(db=dbcon)
         self.model.setTable("slide")
-
-        ################################################
-        #example code uses this to select the relation to apply to the combobox
-        #which doens't work because the relationModel is indexed on the master table
-        #not the detail table. In the example they're the same so it works
-
-        #sample_index=self.model.fieldIndex("sampleid")
-        #
-        self.model.setRelation(0, QSqlRelation("sample",
-                                               "sampleid", "location"))
         self.model.select()
 
-        #link the master combobox to the relation between the tables
-        relModel = self.model.relationModel(0)
-        self.location.setModel(relModel)
-        self.location.setModelColumn(relModel.fieldIndex("location"))
 
         #set up the mapper
         self.mapper = QDataWidgetMapper(self)
         self.mapper.setModel(self.model)
-
-        #delegate require to make the relation work
-        self.mapper.setItemDelegate(QSqlRelationalDelegate(self))
-
-        self.mapper.addMapping(self.location, 1)
+        self.mapper.addMapping(self.slideid, 0)
+        self.mapper.addMapping(self.sample, 1)
         self.mapper.addMapping(self.slide_reference, 2)
         self.mapper.addMapping(self.depth, 3)
         self.mapper.addMapping(self.current_x, 4)
         self.mapper.addMapping(self.current_y, 5)
         self.mapper.addMapping(self.current_count, 7)
-
+        self.mapper.addMapping(self.notes, 8)
+        self.mapper.addMapping(self.is_current_slide, 9)
         self.mapper.addMapping(self.target_count, self.model.fieldIndex("target_count"))
-
-
-        self.model.select()
         self.mapper.toFirst()
+
+        while not self.is_current_slide.text()=='Yes':
+           self.mapper.toNext()
 
         controls = QHBoxLayout()
         prev_rec = QPushButton("Previous")
@@ -114,8 +105,17 @@ class SampleWindow(QWidget):
         controls.addWidget(save_rec)
         controls.addWidget(cancel_rec)
 
+        controlsrow2 = QHBoxLayout()
+        new_rec = QPushButton("New")
+        new_rec.clicked.connect(lambda: self.new_sample())
+        current_rec = QPushButton("Set Current")
+        current_rec.clicked.connect(lambda: self.set_current())
+        controlsrow2.addWidget(new_rec)
+        controlsrow2.addWidget(current_rec)
+
         layout.addLayout(form)
         layout.addLayout(controls)
+        layout.addLayout(controlsrow2)
 
         self.setLayout(layout)
         self.setWindowModality(Qt.ApplicationModal)
@@ -124,6 +124,13 @@ class SampleWindow(QWidget):
         self.mapper.submit()
         self.close()
 
+    def new_sample(self):
+        insert_new_sample_to_database()
+        self.close()
+
+    def set_current(self):
+        set_current_slide_in_database(self.slideid.text())
+        self.close()
 
 class SettingsWindow(QWidget):
     def __init__(self):
@@ -178,11 +185,14 @@ class SettingsWindow(QWidget):
 
         self.close()
 
+
+
+
 def get_model_settings():
     print("Database:", dbcon.databaseName(), "Connection:", dbcon.connectionName())
     query = QSqlQuery()
-    if query.exec("SELECT settings.modelname ,model_location,user_type,modelfile,labelmapfile,current_slide,slide_reference,location FROM settings,model,slide,sample  where settings.modelname=model.modelname and slide.slideid=settings.current_slide and sample.sampleid=slide.sampleid"):
-        modelname,model_location,user_type,modelfile,labelmapfile,current_slide,slide_reference,location = range(8)
+    if query.exec("SELECT settings.modelname ,model_location,user_type,modelfile,labelmapfile,current_slide,slide_reference,sample FROM settings,model,slide  where settings.modelname=model.modelname and slide.slideid=settings.current_slide "):
+        modelname,model_location,user_type,modelfile,labelmapfile,current_slide,slide_reference,sample = range(8)
         if query.first():
             settings_dict={
                 "modelname": query.value(modelname),
@@ -192,7 +202,7 @@ def get_model_settings():
                 "labelmapfile": query.value(labelmapfile),
                 "current_slide":query.value(current_slide),
                 "slide_reference":query.value(slide_reference),
-                 "location": query.value(location)
+                 "location": query.value(sample)
                     }
             print(settings_dict)
             return settings_dict
@@ -200,18 +210,17 @@ def get_model_settings():
 def get_progress_data(slideid):
     #print("Database:", dbcon.databaseName(), "Connection:", dbcon.connectionName())
     query = QSqlQuery()
-    if query.exec("SELECT location,slide_reference,current_count,target_count from slide,sample where slideid="+str(slideid)+" and slide.sampleid=sample.sampleid"):
+    if query.exec("SELECT sample,slide_reference,current_count,target_count from slide where slideid="+str(slideid)):
         location,slide_reference,current_count,target_count = range(4)
         if query.first():
             progress_dict={
-                "location": query.value(location),
+                "sample": query.value(location),
                 "slide_reference": query.value(slide_reference),
                 "current_count":query.value(current_count),
                 "target_count":query.value(target_count)
                     }
             print(progress_dict)
             return progress_dict
-
 
 def get_slide_count(slideid):
     #print("Database:", dbcon.databaseName(), "Connection:", dbcon.connectionName())
@@ -267,3 +276,49 @@ def save_labels_to_database(slideid,label_data):
 
     set_slide_count(slideid)
 
+def insert_new_sample_to_database():
+    query = QSqlQuery()
+    #slide and sample hardcoded currently -tbd
+    query.prepare(
+    """
+
+    INSERT INTO slide (sample,slide_reference,depth,current_x,current_y,target_count,current_count,notes,is_current_slide)
+
+    VALUES ( '', '' ,0, 0, 0, 100, 0, '','New')
+
+    """
+
+)
+
+    query.exec()
+    query.finish()
+    set_new_slide_as_current_in_database()
+
+def set_new_slide_as_current_in_database():
+    query = QSqlQuery()
+    querystring="Update slide set  is_current_slide='No' where is_current_slide='Yes'"
+
+    query.exec(querystring)
+
+    querystring = "Update slide set is_current_slide='Yes' where is_current_slide='New'"
+
+    query.exec(querystring)
+
+    querystring="Update settings set current_slide=(select slideid from slide where is_current_slide='Yes')"
+
+    query.exec(querystring)
+
+def set_current_slide_in_database(slideid):
+    query = QSqlQuery()
+    querystring = "Update slide set  is_current_slide='No' where is_current_slide='Yes'"
+
+    query.exec(querystring)
+
+
+    querystring = "Update slide set is_current_slide='Yes' where slideid="+str(slideid)
+
+    query.exec(querystring)
+
+    querystring = "Update settings set current_slide="+str(slideid)
+
+    query.exec(querystring)

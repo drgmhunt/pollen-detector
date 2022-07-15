@@ -26,7 +26,6 @@ class LabelScene(QGraphicsScene):
         self.selectionChanged.connect(lambda: self.graphics_selected(self.labels))
         self.setSceneRect(0, 0, 1296, 972)
 
-
     def graphics_selected(self, labels):
         sceneview=self.views()[0]
         print(sceneview)
@@ -88,16 +87,17 @@ class LabelScene(QGraphicsScene):
                         item.setPixmap(QPixmap(""))
 
 
-    def save_labels(self):
+    def save_labels(self,slideid):
         print("Save labels")
         label_data = []
+        imageid=1
         for item in self.items():
             obj_type = type(item)
             if not item.data(0)==999999 and obj_type == QGraphicsTextItem and not item.data(2)==None:
                     #need to add the current slideid and imageid
-                    label_tuple=(1,1,item.data(2),item.data(3),item.data(4),item.data(5),item.data(1),item.data(6),item.data(7))
+                    label_tuple=(slideid,imageid,item.data(2),item.data(3),item.data(4),item.data(5),item.data(1),item.data(6),item.data(7))
                     label_data.append(label_tuple)
-        save_labels_to_database(label_data)
+        save_labels_to_database(slideid,label_data)
             #if self.settings_dict=="expert":
                 #code to save image and XML
                # print("saving image and XML)")

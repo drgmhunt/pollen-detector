@@ -13,9 +13,8 @@ tf.disable_v2_behavior()
 
 from object_detection.utils import visualization_utils as vis_util
 
-from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import  QSize
-from PyQt5.QtGui import QIcon,QKeySequence,QImageWriter
+from PyQt5.QtGui import QIcon,QKeySequence,QImageWriter,QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QGraphicsView,
@@ -35,8 +34,9 @@ from PyQt5.QtWidgets import (
 
 from camera import CameraWin
 from pollenscene import LabelScene
-from database import get_settings,save_labels_to_database
+from database import get_model_settings,save_labels_to_database,SampleWindow,SettingsWindow,ProgressWidget,get_progress_data
 from classify import run_inference_for_single_image, setup_model
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -45,25 +45,29 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Pollen Detection Prototype")
 
         # get settings from database
-        settings_dict = get_settings()
-
+        settings_dict = get_model_settings()
         #setup model for detection based on settings
+        print(settings_dict)
 
         self.detection_graph=setup_model(self,settings_dict["modelfile"],settings_dict["labelmapfile"])
         print(self.category_index[1]["name"])
 
         #set up actions for toolbar,menu and buttons
 
+        edit_settings = QAction(QIcon("./icons/settings.png"), "&Settings", self)
+        edit_settings.setStatusTip("Change model and target count settings")
+        edit_settings.triggered.connect(self.onEditSettingsButtonClick)
+
+        load_image_action = QAction(QIcon("./icons/load.png"), "&Load Image", self)
+        load_image_action.setStatusTip("Load new image file from microscope")
+        load_image_action.triggered.connect(self.onLoadImageButtonClick)
+        load_image_action.setShortcut(QKeySequence("Ctrl+f"))
+
         use_live_feed=QAction(QIcon("./icons/microscope.png"), "&Load Image", self)
         use_live_feed.setStatusTip("Load new image file from microscope")
         use_live_feed.triggered.connect(self.onLiveFeedClick)
         use_live_feed.setShortcut(QKeySequence("Ctrl+i"))
         use_live_feed.setCheckable(True)
-
-        load_image_action=QAction(QIcon("./icons/load.png"), "&Load Image", self)
-        load_image_action.setStatusTip("Load new image file from microscope")
-        load_image_action.triggered.connect(self.onLoadImageButtonClick)
-        load_image_action.setShortcut(QKeySequence("Ctrl+f"))
 
         classify_image_action=QAction(QIcon("./icons/robot.png"), "&Classify Image", self)
         classify_image_action.setStatusTip("USe model to classify pollen")
@@ -81,7 +85,7 @@ class MainWindow(QMainWindow):
         show_progress_action.triggered.connect(self.onDisplayProgressButtonClick)
         show_progress_action.setShortcut(QKeySequence("Ctrl+p"))
 
-        sample_slide_action=QAction("Current Sample", self)
+        sample_slide_action=QAction("Choose Slide", self)
         sample_slide_action.setStatusTip("Current sample details")
         sample_slide_action.triggered.connect(self.onEditSampleButtonClick)
         sample_slide_action.setShortcut(QKeySequence("Ctrl+i"))
@@ -91,10 +95,6 @@ class MainWindow(QMainWindow):
         save_labels_action.triggered.connect(self.onSaveLabelsButtonClick)
         save_labels_action.setShortcut(QKeySequence("Ctrl+s"))
 
-        cancel_labels_action = QAction("Save Labels", self)
-        cancel_labels_action.setStatusTip("Save labels from current screen")
-        cancel_labels_action.triggered.connect(self.onCancelLabelsButtonClick)
-        cancel_labels_action.setShortcut(QKeySequence("Ctrl+s"))
 
 # set up toolbar
 
@@ -102,6 +102,7 @@ class MainWindow(QMainWindow):
         toolbar.setIconSize(QSize(44, 44))
         self.addToolBar(toolbar)
 
+        toolbar.addAction(edit_settings)
         toolbar.addAction(load_image_action)
         toolbar.addAction(use_live_feed)
         toolbar.addAction(classify_image_action)
@@ -115,20 +116,25 @@ class MainWindow(QMainWindow):
         #set up menu
         menu = self.menuBar()
         file_menu = menu.addMenu("&File")
-        file_menu.addAction(load_image_action)
+        file_menu.addAction(edit_settings)
         file_menu.addSeparator()
         file_submenu = file_menu.addMenu("Export")
 
         file_menu = menu.addMenu("&Action")
-
         file_menu.addAction(load_image_action)
+        file_menu.addAction(use_live_feed)
         file_menu.addAction(classify_image_action)
         file_menu.addAction(label_image_action)
+
+
 
         #set up layout
 
         vbox = QVBoxLayout()
 
+        self.progresswidget=ProgressWidget()
+        self.update_progress(settings_dict["current_slide"])
+        vbox.addWidget(self.progresswidget)
         displaybtn = QPushButton("Load Image")
         displaybtn.clicked.connect(load_image_action.trigger)
         vbox.addWidget(displaybtn)
@@ -142,9 +148,7 @@ class MainWindow(QMainWindow):
         savebtn = QPushButton("Save")
         savebtn.clicked.connect(save_labels_action.trigger)
         vbox.addWidget(savebtn)
-        cancelbtn = QPushButton("Cancel")
-        cancelbtn.clicked.connect(cancel_labels_action.trigger)
-        vbox.addWidget(cancelbtn)
+
 
 
         hbox = QHBoxLayout()
@@ -175,6 +179,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         main_widget.setLayout(hbox)
 
+    def onEditSettingsButtonClick(self, s):
+        print("edit settings", s)
+        self.w = SettingsWindow()
+        self.w.show()
 
 
 
@@ -199,6 +207,8 @@ class MainWindow(QMainWindow):
         print(QImageWriter.supportedImageFormats())
         if self.camwin.label.isVisible():
             self.camwin.label.pixmap().save("./working_image.jpg","JPEG")
+        settings_dict = get_model_settings()
+        self.detection_graph = setup_model(self, settings_dict["modelfile"], settings_dict["labelmapfile"])
         self.run_object_detection()
 
     def onLabelImageButtonClick(self, s):
@@ -210,13 +220,19 @@ class MainWindow(QMainWindow):
 
     def onDisplayProgressButtonClick(self, s):
         print("show progress", s)
+        self.w =ProgressWidget()
+        self.w.show()
 
     def onEditSampleButtonClick(self, s):
         print("edit sample", s)
+        self.w = SampleWindow()
+        self.w.show()
 
     def onSaveLabelsButtonClick(self, s):
         print("save labels", s)
-        self.scene.save_labels()
+        settings_dict = get_model_settings()
+        self.scene.save_labels(settings_dict["current_slide"])
+        self.update_progress(settings_dict["current_slide"])
 
     def onCancelLabelsButtonClick(self, s):
         print("cancel labels", s)
@@ -230,6 +246,17 @@ class MainWindow(QMainWindow):
         else:
             self.camwin.setVisible(True)
             self.pixmapitem.setVisible(False)
+
+    def update_progress(self,slideid):
+        progress_dict = get_progress_data(slideid)
+        self.progresswidget.slide_reference.setText(progress_dict["location"] + ":" + progress_dict["slide_reference"])
+        self.progresswidget.progress_bar.setRange(0,progress_dict["target_count"])
+
+        if progress_dict["current_count"]>= progress_dict["target_count"]:
+            button = QMessageBox.information(self, "Target Count", "Pollen Target Count Reached for "+progress_dict["location"] + ":" + progress_dict["slide_reference"])
+            self.progresswidget.progress_bar.setValue(progress_dict["target_count"])
+        else:
+            self.progresswidget.progress_bar.setValue(progress_dict["current_count"])
 
     def load_image_into_numpy_array(self,image):
         (im_width, im_height) = image.size

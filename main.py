@@ -26,7 +26,8 @@ from PyQt5.QtWidgets import (
     QAction,
     QStatusBar,
     QToolBar,
-    QMessageBox
+    QMessageBox,
+    QInputDialog
 )
 
 #modified version of qt.py from http://www.touptek.com/download/showdownload.php?lang=en&id=32
@@ -34,9 +35,11 @@ from PyQt5.QtWidgets import (
 
 from camera import CameraWin
 from pollenscene import LabelScene
-from database import get_model_settings,save_labels_to_database,SampleWindow,SettingsWindow,ProgressWidget,get_progress_data
+from database import dbcon,get_model_settings,save_labels_to_database,get_progress_data
 from classify import run_inference_for_single_image, setup_model
-
+from settings import SettingsWindow
+from samplewindow import SampleWindow
+from progresschart import ProgressGraphWindow,ProgressWidget
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -93,6 +96,9 @@ class MainWindow(QMainWindow):
         save_labels_action.setStatusTip("Save labels from current screen")
         save_labels_action.triggered.connect(self.onSaveLabelsButtonClick)
         save_labels_action.setShortcut(QKeySequence("Ctrl+s"))
+
+        export_labels_action = QAction(QIcon("./icons/save.png"), "&Save Labels", self)
+        export_labels_action.triggered.connect(self.onExportLabelsButtonClick)
 
         save_as_VOC=QAction("&VOC",self)
         save_as_TF = QAction("&TF", self)
@@ -152,7 +158,7 @@ class MainWindow(QMainWindow):
         vbox = QVBoxLayout()
 
         self.progresswidget=ProgressWidget()
-        self.update_progress(settings_dict["current_slide"])
+        self.update_progress()
         vbox.addWidget(self.progresswidget)
         displaybtn = QPushButton("Load Image")
         displaybtn.clicked.connect(load_image_action.trigger)
@@ -167,7 +173,9 @@ class MainWindow(QMainWindow):
         savebtn = QPushButton("Save")
         savebtn.clicked.connect(save_labels_action.trigger)
         vbox.addWidget(savebtn)
-
+        #exportbtn = QPushButton("Export")
+        #exportbtn.clicked.connect(export_labels_action.trigger)
+        #vbox.addWidget(exportbtn)
 
 
         hbox = QHBoxLayout()
@@ -175,7 +183,7 @@ class MainWindow(QMainWindow):
         self.scene = LabelScene()
 
         labels=[]
-        print(self.category_index)
+
         for labelkey in self.category_index:
             labels.append(self.category_index[labelkey]["name"])
         self.scene.labels=labels
@@ -198,10 +206,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         main_widget.setLayout(hbox)
 
+
+
+
     def onEditSettingsButtonClick(self, s):
-        print("edit settings", s)
+
         self.w = SettingsWindow()
         self.w.show()
+
 
 
 
@@ -222,43 +234,65 @@ class MainWindow(QMainWindow):
             i=i+1
 
     def onClassifyImageButtonClick(self, s):
-        print("classify image", s)
-        print(QImageWriter.supportedImageFormats())
+
+        #print(QImageWriter.supportedImageFormats())
         if self.camwin.label.isVisible():
             self.camwin.label.pixmap().save("./working_image.jpg","JPEG")
         settings_dict = get_model_settings()
         self.detection_graph = setup_model(self, settings_dict["modelfile"], settings_dict["labelmapfile"])
         self.run_object_detection()
+        # save model classifications -don't update progress because it doesn't count until user has checked and saved
+        #fileprefix can be blank here because not going to save the file yet
+        self.scene.save_labels(settings_dict["current_slide"],'model','')
+
 
     def onLabelImageButtonClick(self, s):
-        print("label image", s)
+
         #put in draw mode when checked, turn off when unchecked
         #self.scene.draw_mode(s)
         #change of plan - button/action sets draw to true. turned off after box drawn
         self.scene.draw_mode(True)
 
     def onDisplayProgressButtonClick(self, s):
-        print("show progress", s)
 
-        self.w =ProgressWidget()
+        self.w =ProgressGraphWindow()
         self.w.show()
 
     def onEditSampleButtonClick(self, s):
-        print("edit sample", s)
+
         settings_dict = get_model_settings()
         self.w = SampleWindow(settings_dict["current_slide"])
         self.w.show()
         settings_dict = get_model_settings()
-        self.update_progress(settings_dict["current_slide"])
+        self.update_progress()
 
     def onSaveLabelsButtonClick(self, s):
-        print("save labels", s)
-        settings_dict = get_model_settings()
-        self.scene.save_labels(settings_dict["current_slide"])
-        self.update_progress(settings_dict["current_slide"])
 
-    def onCancelLabelsButtonClick(self, s):
-        print("cancel labels", s)
+        settings_dict = get_model_settings()
+
+        fileprefix=''
+        if settings_dict["user_type"]=="expert":
+            grading, ok = QInputDialog.getItem(self, "Grade Image",
+                                              "Quality", ["High","Medium","Low","Empty"], 4, True)
+            if ok:
+
+                fileprefix=grading[:1]+''
+
+        self.scene.save_labels(settings_dict["current_slide"],'user',fileprefix)
+
+        if settings_dict["user_type"] == "expert":
+            button = QMessageBox.information(self, "Save Labels", "Images and labels saved in VOC format")
+        self.update_progress()
+
+
+
+    def onExportLabelsButtonClick(self, s):
+        #data saved in VOC format on Save. Export function needs to collect just the data for a given slide
+        # and export that
+        print("export data not implemented")
+
+
+
 
     def onLiveFeedClick(self, s):
         #make live feed visible or invisible
@@ -270,9 +304,15 @@ class MainWindow(QMainWindow):
             self.camwin.setVisible(True)
             self.pixmapitem.setVisible(False)
 
-    def update_progress(self,slideid):
-        progress_dict = get_progress_data(slideid)
 
+    def focus_changed(self):
+        #unable to figure out what change to detect, so updte the progress bar every time focus changes
+        self.update_progress()
+
+    def update_progress(self):
+        settings_dict = get_model_settings()
+        progress_dict = get_progress_data(settings_dict["current_slide"])
+        self.progresswidget.model_name.setText("Model: "+settings_dict["modelname"])
         self.progresswidget.slide_reference.setText(progress_dict["sample"] + ":" + progress_dict["slide_reference"])
         self.progresswidget.progress_bar.setRange(0,progress_dict["target_count"])
 
@@ -342,5 +382,5 @@ app = QApplication(sys.argv)
 
 window = MainWindow()
 window.show()
-
+app.focusChanged.connect(lambda:window.focus_changed())
 app.exec()

@@ -1,7 +1,12 @@
 
+import shutil
+
+from lxml import etree
+import codecs
+
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt,QPoint
-from PyQt5.QtGui import QBrush,  QPen
+from PyQt5.QtGui import QBrush,  QPen,QImage
 from PyQt5.QtWidgets import (
     QGraphicsItem,
     QGraphicsRectItem,
@@ -12,7 +17,8 @@ from PyQt5.QtWidgets import (
     QInputDialog
 )
 
-from database import save_labels_to_database
+from database import save_labels_to_database,delete_saved_labels_from_database,save_image_to_database,update_image_filename,connect_saved_model_labels_to_image
+
 
 class LabelScene(QGraphicsScene):
     rectexists = False
@@ -22,36 +28,38 @@ class LabelScene(QGraphicsScene):
 
     def __init__(self):
         super().__init__()
+
         self.labels = []
         self.selectionChanged.connect(lambda: self.graphics_selected(self.labels))
         self.setSceneRect(0, 0, 1296, 972)
 
+
     def graphics_selected(self, labels):
         sceneview=self.views()[0]
-        print(sceneview)
+
         items = self.selectedItems()
         for item in items:
             obj_type = type(item)
 
             if obj_type == QGraphicsTextItem:
-                print("Current selected item is: ", item.type(), " index ", item.data(0), " label ", item.data(1))
+                #print("Current selected item is: ", item.type(), " index ", item.data(0), " label ", item.data(1))
                 numlabel = 0
                 i = 0
                 for label in self.labels:
                     if item.data(1) == label:
                         numlabel = i
                     i = i + 1
-                classlabel, ok = QInputDialog.getItem(sceneview, "select input dialog",
-                                                      "list of languages", self.labels, numlabel, True)
+                classlabel, ok = QInputDialog.getItem(sceneview, "Change Species",
+                                                      "Species List", self.labels, numlabel, True)
                 if ok and classlabel:
-                    print(classlabel)
                     # change text on box and data held with label
                     item.setPlainText(classlabel)
                     item.setData(1, classlabel)
+                    if  classlabel not in self.labels:
+                        self.labels.append(classlabel)
                 item.setSelected(False)
 
             elif obj_type == QGraphicsPixmapItem:
-                print("Trash")
                 allitems = self.items()
                 for checkitem in allitems:
                     if checkitem.data(0) == item.data(0):
@@ -85,24 +93,73 @@ class LabelScene(QGraphicsScene):
                 else:
                     if clear_image:
                         item.setPixmap(QPixmap(""))
+        self.rectexists = False
 
-
-    def save_labels(self,slideid):
-        print("Save labels")
+    def save_labels(self,slideid,usertype,fileprefix):
         label_data = []
-        imageid=1
+        if usertype=='user':
+            image_path, imageid = save_image_to_database(slideid,fileprefix)
+            update_image_filename(imageid,image_path)
+        else:
+            imageid=0
+
+        bbox_string=""
         for item in self.items():
             obj_type = type(item)
             if not item.data(0)==999999 and obj_type == QGraphicsTextItem and not item.data(2)==None:
                     #need to add the current slideid and imageid
-                    label_tuple=(slideid,imageid,item.data(2),item.data(3),item.data(4),item.data(5),item.data(1),item.data(6),item.data(7))
-                    label_data.append(label_tuple)
+                    #ignore deleted items
+                    if item.isVisible():
+                        label_tuple=(slideid,imageid,2*item.data(2),2*item.data(3),2*item.data(4),2*item.data(5),item.data(1),item.data(6),usertype)
+                        label_data.append(label_tuple)
+                        bbox_string=bbox_string+self.bbox_xml(item)
+
+        delete_saved_labels_from_database(imageid,slideid, usertype)
         save_labels_to_database(slideid,label_data)
-            #if self.settings_dict=="expert":
-                #code to save image and XML
-               # print("saving image and XML)")
-        #set clear_image=True to clear the picture ready for another one
-        self.clear_scene(True)
+
+        if usertype=="user":
+            self.clear_scene(True)
+            self.save_image_to_file(slideid, image_path)
+            connect_saved_model_labels_to_image(slideid,imageid)
+
+            raw_image_path = r"{}".format(image_path)
+            y = raw_image_path.split("\\")
+            xml_filepath = raw_image_path.replace("jpg", "xml")
+            annot_str="<annotation><folder>" +y[len(y) - 2]+ "</folder><filename> " +y[len(y) - 1]+ " </filename>"
+            path_str="<path> " +image_path+" </path><source><database> Unknown </database> </source>"
+            size_str= "<size><width> 2592 </width><height> 1944 </height><depth> 3 </depth ></size><segmented> 0 </segmented>"
+
+            full_xml=annot_str+path_str+size_str+bbox_string+'</annotation> '
+            self.write_xml(full_xml, xml_filepath)
+
+
+
+
+    def save_image_to_file(self,slideid,image_path):
+        srcpath = "./working_image.jpg"
+        shutil.copy(srcpath, image_path)
+
+    def bbox_xml(self,item):
+
+        obj_header="<object><name>"+item.data(1)+"</name>"
+        obj_other="<pose> Unspecified </pose><truncated> 0 </truncated><difficult> 0 </difficult>"
+        xminstr="<bndbox><xmin>"+str(2*item.data(2))+"</xmin>"
+        yminstr = "<ymin>" + str(2*item.data(3)) + "</ymin>"
+        xmaxstr = "<xmax>" + str(2*(item.data(2)+item.data(5))) + "</xmax>"
+        ymaxstr = "<ymax>" + str(2*(item.data(3)+item.data(4))) + "</ymax></bndbox>"
+        return obj_header+obj_other+xminstr+yminstr+xmaxstr+ymaxstr+"</object>"
+
+    def write_xml(self, full_xml,xml_filepath):
+
+        out_file = codecs.open('temp.xml', 'w', encoding='utf8')
+        out_file.write(full_xml)
+        out_file.close()
+        tree = etree.parse("temp.xml")
+        pretty = etree.tostring(tree, encoding="unicode", pretty_print=True)
+        # write to xml file in output folder
+        out_file = codecs.open(xml_filepath, 'w', encoding='utf8')
+        out_file.write(pretty)
+        out_file.close()
 
     def mouseReleaseEvent(self, event):
         if self.drawstatus:
@@ -124,12 +181,10 @@ class LabelScene(QGraphicsScene):
 
     def mousePressEvent(self, event):
         if self.drawstatus:
-            print("press", event.scenePos().x(), event.scenePos().y())
-
             self.rect.setRect(event.scenePos().x(), event.scenePos().y(), 1, 1)
             self.rectpos = event.scenePos()
-            print("rectpos", self.rectpos.x(), self.rectpos.y())
             if not self.rectexists:
+                self.rect =QGraphicsRectItem()
                 self.addItem(self.rect)
                 self.rectexists = True
             else:
@@ -141,14 +196,13 @@ class LabelScene(QGraphicsScene):
             if self.rectexists:
                 w = abs(self.rectpos.x() - event.scenePos().x())
                 h = abs(self.rectpos.y() - event.scenePos().y())
-                # print ("w, h ",w,h)
                 self.rect.setRect(self.rectpos.x(), self.rectpos.y(), w, h)
 
         super().mouseMoveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
 
-        print("double click", event.scenePos())
+
         super().mouseDoubleClickEvent(event)
 
     def draw_box(self, numbox, x, y, h, w ,classlabel,p,userflag ):
@@ -162,7 +216,7 @@ class LabelScene(QGraphicsScene):
 
         #create and draw bounding box
         rect = QGraphicsRectItem(x, y, w, h)
-        pen = QPen(Qt.red)
+        pen = QPen(Qt.black)
         rect.setPen(pen)
         brush = QBrush(Qt.NoBrush)
         rect.setBrush(brush)
@@ -200,8 +254,6 @@ class LabelScene(QGraphicsScene):
         probtext.setPos(x+w-60, y)
         probtext.setData(0, numbox)
         self.addItem(probtext)
-
-
 
 
 

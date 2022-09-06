@@ -2,12 +2,14 @@
 Prototype pollen classification and annotation tool
 
 
-Version 1 
+main.py runs the app 
+ 
+connects to digital camera using API provided by ToupTek
+  
+GitHub repository does not include the model
 
-main-v1.py displays a fixed input file and runs object detection model
-result is a BW image with boxes
-also includes test custom object as step towards clickable boxes
+Model files are at;
 
-qt-v1.py is a test harness for the camera API dervied from  http://www.touptek.com/download/showdownload.php?lang=en&id=32
+https://huntlancaster.co.uk/wp-content/uploads/2022/09/pollen-detection-models.zip
 
-GitHub repsoitory does not include the model
+Unzip and place in folder model to use
